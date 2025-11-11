@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>three.js 図形ビューア</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        /* --- テーマ変数定義 --- */
+        :root {
+            --bg-color: #f0f0f0;
+            --text-color: #333333;
+            --object-color: #1e90ff;
+            --ui-bg-color: rgba(255, 255, 255, 0.8);
+            --border-color: #cccccc;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #1a1a1a;
+                --text-color: #f0f0f0;
+                --object-color: #46a3ff;
+                --ui-bg-color: rgba(40, 40, 40, 0.8);
+                --border-color: #555555;
+            }
+        }
+
+        /* --- 基本スタイル --- */
+        body {
+            margin: 0;
+            font-family: 'Roboto', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            overflow: hidden; /* スクロールバーを非表示 */
+        }
+
+        /* --- three.jsのキャンバス --- */
+        #webgl-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            outline: none;
+        }
+
+        /* --- UI要素のスタイル --- */
+        #ui-container {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            padding: 15px 20px;
+            background-color: var(--ui-bg-color);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+            z-index: 10;
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 1.2em;
+        }
+
+        label {
+            margin-right: 10px;
+            font-weight: bold;
+        }
+
+        #shape-selector {
+            font-family: 'Roboto', sans-serif;
+            padding: 5px 8px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-container">
+        <h1>図形を選択</h1>
+        <label for="shape-selector">形状:</label>
+        <select id="shape-selector">
+            <option value="cube">立方体</option>
+            <option value="box">直方体</option>
+            <option value="cylinder">円柱</option>
+            <option value="cone">円錐</option>
+            <option value="triangular_prism">三角柱</option>
+            <option value="pentagonal_prism">五角柱</option>
+            <option value="hexagonal_prism">六角柱</option>
+            <option value="triangular_pyramid">三角錐</option>
+            <option value="square_pyramid">四角錐</option>
+            <option value="pentagonal_pyramid">五角錐</option>
+            <option value="hexagonal_pyramid">六角錐</option>
+        </select>
+    </div>
+
+    <!-- three.jsの描画キャンバス -->
+    <canvas id="webgl-canvas"></canvas>
+
+    <!-- Import maps for three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls, currentMesh;
+        let material;
+
+        // --- 初期化処理 ---
+        function init() {
+            // シーン
+            scene = new THREE.Scene();
+
+            // カメラ
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 5;
+
+            // レンダラー
+            const canvas = document.getElementById('webgl-canvas');
+            renderer = new THREE.WebGLRenderer({
+                canvas: canvas,
+                antialias: true,
+                alpha: true // 背景を透過させる
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+
+            // ライト
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(5, 5, 5);
+            scene.add(directionalLight);
+
+            // マテリアル
+            material = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.5 });
+            
+            // コントロール
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            // UIイベントリスナー
+            const selector = document.getElementById('shape-selector');
+            selector.addEventListener('change', (event) => {
+                createShape(event.target.value);
+            });
+
+            // ウィンドウリサイズ対応
+            window.addEventListener('resize', onWindowResize);
+            
+            // テーマ変更対応
+            const colorSchemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+            colorSchemeQuery.addEventListener('change', updateTheme);
+
+            // 初期化
+            createShape(selector.value);
+            updateTheme();
+        }
+
+        // --- 図形を作成する関数 ---
+        function createShape(shapeType) {
+            if (currentMesh) {
+                scene.remove(currentMesh);
+                currentMesh.geometry.dispose();
+            }
+
+            let geometry;
+            const size = 2; // 基本サイズ
+
+            switch (shapeType) {
+                case 'cube':
+                    geometry = new THREE.BoxGeometry(size, size, size);
+                    break;
+                case 'box':
+                    geometry = new THREE.BoxGeometry(size * 1.5, size, size * 0.8);
+                    break;
+                case 'cylinder':
+                    geometry = new THREE.CylinderGeometry(size / 2, size / 2, size * 1.2, 32);
+                    break;
+                case 'cone':
+                    geometry = new THREE.ConeGeometry(size / 2, size * 1.2, 32);
+                    break;
+                case 'triangular_prism': // 三角柱
+                    geometry = new THREE.CylinderGeometry(size / 2, size / 2, size * 1.2, 3);
+                    break;
+                case 'pentagonal_prism': // 五角柱
+                    geometry = new THREE.CylinderGeometry(size / 2, size / 2, size * 1.2, 5);
+                    break;
+                case 'hexagonal_prism': // 六角柱
+                    geometry = new THREE.CylinderGeometry(size / 2, size / 2, size * 1.2, 6);
+                    break;
+                case 'triangular_pyramid': // 三角錐
+                    geometry = new THREE.ConeGeometry(size / 2, size * 1.2, 3);
+                    break;
+                case 'square_pyramid': // 四角錐
+                    geometry = new THREE.ConeGeometry(size / 2, size * 1.2, 4);
+                    break;
+                case 'pentagonal_pyramid': // 五角錐
+                    geometry = new THREE.ConeGeometry(size / 2, size * 1.2, 5);
+                    break;
+                case 'hexagonal_pyramid': // 六角錐
+                    geometry = new THREE.ConeGeometry(size / 2, size * 1.2, 6);
+                    break;
+                default:
+                    geometry = new THREE.BoxGeometry(size, size, size);
+            }
+
+            currentMesh = new THREE.Mesh(geometry, material);
+            scene.add(currentMesh);
+        }
+
+        // --- テーマを更新する関数 ---
+        function updateTheme() {
+            // CSS変数から色を取得
+            const computedStyle = getComputedStyle(document.documentElement);
+            const objectColor = computedStyle.getPropertyValue('--object-color').trim();
+
+            // マテリアルの色を更新
+            material.color.set(objectColor);
+        }
+
+
+        // --- ウィンドウリサイズ処理 ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        }
+
+        // --- アニメーションループ ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // メッシュを回転
+            if (currentMesh) {
+                currentMesh.rotation.x += 0.005;
+                currentMesh.rotation.y += 0.005;
+            }
+            
+            controls.update(); // Dampingを有効にする場合に必要
+            renderer.render(scene, camera);
+        }
+
+        // --- 実行 ---
+        init();
+        animate();
+    </script>
+</body>
+</html>
